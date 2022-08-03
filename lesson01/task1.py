@@ -9,15 +9,15 @@ def host_ping(ip_list):
     false_results = []
     param = '-n' if platform.system().lower() == 'windows' else '-c'
 
-    def ping(current_ip, key):
+    def ping(current_ip):
         process = Popen(['ping', param, '5', current_ip], stdout=PIPE, stderr=PIPE)
         if process.wait() == 0:
             true_results.append(current_ip)
         else:
             false_results.append(current_ip)
 
-    for k, ip in enumerate(ip_list):
-        worker = threading.Thread(target=ping, args=(ip, k))
+    for ip in ip_list:
+        worker = threading.Thread(target=ping, args=(ip,))
         worker.daemon = True
         worker.start()
 
