@@ -5,11 +5,15 @@ import select
 import argparse
 import common.settings as settings
 from common.tcp_socket import TCPSocket
+from common.meta import ServerVerifier
+from common.descriptors import Port
 from logs.settings.socket_logger import SocketLogger
 # from logs.settings.log_decorator import LogDecorator
 
 
-class MsgServer(TCPSocket):
+class MsgServer(TCPSocket, metaclass=ServerVerifier):
+    port = Port()
+
     def __init__(self):
         super().__init__()
         socket_logger = SocketLogger(settings.SERVER_LOGGER_NAME)
@@ -28,16 +32,16 @@ class MsgServer(TCPSocket):
         port = namespace.p
 
         sock = cls()
-
-        if not (port := cls.int_port(port)):
-            sock.logger.critical('Неверно указан порт, допустимый диапазон от 1024 до 65535!')
-            sys.exit(1)
-
         sock.bind(address, port)
         return sock
 
     # @LogDecorator(settings.SERVER_LOGGER_NAME)
     def bind(self, address, port):
+        try:
+            self.port = port
+        except TypeError as e:
+            self.logger.critical(e)
+            sys.exit(1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((address, port))
         self.sock.settimeout(1)

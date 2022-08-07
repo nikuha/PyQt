@@ -7,13 +7,15 @@ import time
 
 import common.settings as settings
 from common.tcp_socket import TCPSocket
+from common.meta import ClientVerifier
+from common.descriptors import Port
 from logs.settings.socket_logger import SocketLogger
-
-
 # from logs.settings.log_decorator import LogDecorator
 
 
-class MsgClient(TCPSocket):
+class MsgClient(TCPSocket, metaclass=ClientVerifier):
+    port = Port()
+
     def __init__(self):
         super().__init__()
         socket_logger = SocketLogger(settings.CLIENT_LOGGER_NAME)
@@ -32,16 +34,16 @@ class MsgClient(TCPSocket):
         account_name = namespace.n
 
         sock = cls()
-
-        if not (port := cls.int_port(port)):
-            sock.logger.critical('Неверно указан порт, допустимый диапазон от 1024 до 65535!')
-            sys.exit(1)
-
         sock.connect(address, port, account_name)
         return sock
 
     # @LogDecorator(settings.CLIENT_LOGGER_NAME)
     def connect(self, address, port, account_name='Guest'):
+        try:
+            self.port = port
+        except TypeError as e:
+            self.logger.critical(e)
+            sys.exit(1)
         try:
             self.sock.connect((address, port))
             self.user = {settings.REQUEST_ACCOUNT_NAME: account_name}
@@ -50,11 +52,6 @@ class MsgClient(TCPSocket):
         except ConnectionRefusedError:
             self.logger.critical(f'Не удалось подключиться к серверу {address}:{port}')
             sys.exit(1)
-
-    def _send_presence(self):
-        self.send_message(self.sock, self._action_request(settings.ACTION_PRESENCE))
-        self.logger.info(self._get_message_response())
-        time.sleep(.5)
 
     def mainloop(self):
 
@@ -75,6 +72,11 @@ class MsgClient(TCPSocket):
         except (KeyboardInterrupt, SystemExit):
             receiver.join()
             self._close()
+
+    def _send_presence(self):
+        self.send_message(self.sock, self._action_request(settings.ACTION_PRESENCE))
+        self.logger.info(self._get_message_response())
+        time.sleep(.5)
 
     def _close(self, reason='client'):
         self.sock.close()
