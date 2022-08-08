@@ -9,12 +9,12 @@ def get_cls_methods(cls_dict, bases=None):
         global_methods = set()
         attributes = set()
     for key in cls_dict:
-        cls_methods.add(key)
         try:
             instructions = dis.get_instructions(cls_dict[key])
         except TypeError:
             pass
         else:
+            cls_methods.add(key)
             for instr in instructions:
                 # print(f'{key} + {instr}')
                 if instr.opname == 'LOAD_GLOBAL':

@@ -123,8 +123,6 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             if account_name:
                 if message_tuple[1][settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
                     self.logger.info(f'Сообщение отправлено пользователю {account_name}.')
-            # else:
-            #     self.logger.error(f'Отправлено уведомление {client_socket.getpeername()}.')
         else:
             self._close_client_socket(client_socket)
 
@@ -134,10 +132,8 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             if not (param in message):
                 self._process_error(client_socket, f'Неверный параметр {param}!')
 
-        if not (settings.REQUEST_ACCOUNT_NAME in message[settings.REQUEST_USER]):
+        if not (account_name := self.get_name_from_message(message)):
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACCOUNT_NAME}!')
-
-        account_name = self.get_name_from_message(message)
         if account_name not in self.names.keys():
             self.names[account_name] = client_socket
 
@@ -169,7 +165,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             return
 
         recipient = message_from_client[settings.REQUEST_DATA][settings.REQUEST_RECIPIENT]
-        sender = message_from_client[settings.REQUEST_USER][settings.REQUEST_ACCOUNT_NAME]
+        sender = self.get_name_from_message(message_from_client)
         msg = message_from_client[settings.REQUEST_DATA][settings.REQUEST_MESSAGE]
         if recipient not in self.names:
             self._process_error(client_socket, f'Пользователь с указанным именем не найден!')
