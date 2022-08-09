@@ -1,7 +1,7 @@
 import json
 import time
 import socket
-from .settings import MAX_PACKAGE_LENGTH, ENCODING, RESPONSE_STATUS, REQUEST_ACCOUNT_NAME
+from .settings import MAX_PACKAGE_LENGTH, ENCODING, REQUEST_ACCOUNT_NAME
 from .settings import REQUEST_ACTION, REQUEST_TIME, REQUEST_USER, REQUEST_DATA
 
 
@@ -27,16 +27,6 @@ class TCPSocket:
         js_message = json.dumps(message)
         sock.send(js_message.encode(ENCODING))
         return True
-
-    @staticmethod
-    def int_port(port):
-        try:
-            port = int(port)
-            if not 1023 < port < 65535:
-                raise ValueError
-        except ValueError:
-            return None
-        return port
 
     def compose_action_request(self, action, user=None, data=None):
         request = {
