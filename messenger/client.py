@@ -8,13 +8,14 @@ import time
 import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ClientVerifier
-from common.descriptors import Port
+from common.descriptors import Port, Address
 from logs.settings.socket_logger import SocketLogger
 # from logs.settings.log_decorator import LogDecorator
 
 
 class MsgClient(TCPSocket, metaclass=ClientVerifier):
     port = Port()
+    address = Address()
 
     def __init__(self):
         super().__init__()
@@ -95,20 +96,22 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
             message = self.get_message(self.sock)
             # self.logger.info(message)
             if settings.REQUEST_ACTION not in message:
-                raise ValueError
+                raise ValueError(settings.REQUEST_ACTION)
             if message[settings.REQUEST_ACTION] == settings.ACTION_RESPONSE:
                 if settings.REQUEST_DATA not in message:
-                    raise ValueError
+                    raise ValueError(settings.REQUEST_DATA)
                 return self._get_response(message[settings.REQUEST_DATA])
             if message[settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
                 if settings.REQUEST_DATA not in message:
-                    raise ValueError
+                    raise ValueError(settings.REQUEST_DATA)
                 return self._get_p2p_message(message[settings.REQUEST_DATA])
             raise ValueError
+        except (OSError, ConnectionError, ConnectionAbortedError, ConnectionResetError):
+            self._lost_connection()
         except json.JSONDecodeError:
             return None
-        except ValueError:
-            return 'Неверный ответ сервера!'
+        except ValueError as e:
+            return 'Неверный ответ сервера!' + e
 
     def _action_request(self, action, data=None):
         return self.compose_action_request(action, data=data)
@@ -164,13 +167,8 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
     def _getting_server_messages(self):
         while True:
             time.sleep(0.5)
-            try:
-                response = self._get_message_response()
-                if response:
-                    self.logger.info(response)
-            except (OSError, ConnectionError, ConnectionAbortedError,
-                    ConnectionResetError, json.JSONDecodeError):
-                self._lost_connection()
+            if response := self._get_message_response():
+                self.logger.info(response)
 
     def _interactive(self):
         self._print_help()
@@ -185,7 +183,7 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
                 time.sleep(0.5)
                 break
             else:
-                self.logger.info('Неизвестная команда. Воспользуйтесь help')
+                print('Неизвестная команда. Воспользуйтесь help')
 
 
 if __name__ == '__main__':

@@ -3,16 +3,20 @@ import socket
 import sys
 import select
 import argparse
+import threading
+import time
 import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ServerVerifier
-from common.descriptors import Port
+from common.descriptors import Port, Address
 from logs.settings.socket_logger import SocketLogger
+from db.server_db import ServerDB
 # from logs.settings.log_decorator import LogDecorator
 
 
 class MsgServer(TCPSocket, metaclass=ServerVerifier):
     port = Port()
+    address = Address()
 
     def __init__(self):
         super().__init__()
@@ -21,6 +25,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         self.clients = []
         self.messages = []
         self.names = {}
+        self.db = ServerDB()
 
     @classmethod
     def bind_from_args(cls):
@@ -42,12 +47,21 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         except TypeError as e:
             self.logger.critical(e)
             sys.exit(1)
+        self.address = address
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((address, port))
         self.sock.settimeout(1)
         self.logger.info(f'Сервер запушен на {address}:{port}')
 
-    def start_listen(self):
+    def mainloop(self):
+
+        client_listener = threading.Thread(target=self._start_listen)
+        client_listener.daemon = True
+        client_listener.start()
+
+        self._interactive()
+
+    def _start_listen(self):
         self.sock.listen(settings.MAX_CONNECTIONS)
         self.logger.info(f'Слушаем запросы от клиента...')
 
@@ -102,12 +116,20 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             return None
         return self.names[account_name]
 
+    def _get_account_name_by_socket(self, client_socket):
+        for name in self.names:
+            if self.names[name] == client_socket:
+                return name
+        return None
+
     def _close_client_socket(self, client_socket):
         if isinstance(client_socket, str):
             client_socket = self._get_socket_by_name(client_socket)
         if client_socket:
             self.logger.info(f'Клиент {client_socket.getpeername()} отключился от сервера.')
             client_socket.close()
+            if account_name := self._get_account_name_by_socket(client_socket):
+                self.db.user_logout(account_name)
             self.names = {key: value for (key, value) in self.names.items() if value != client_socket}
             self.clients.remove(client_socket)
 
@@ -151,6 +173,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
 
     def _process_presence(self, account_name):
         self.logger.info(f'Пользователь {account_name} онлайн')
+        self.db.user_login(account_name, self.address, self.port)
         self.messages.append((account_name, self._compose_response(200, message='Вы онлайн.')))
 
     def _process_p2p_message(self, client_socket, message_from_client):
@@ -186,7 +209,38 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             data[settings.RESPONSE_MESSAGE] = message
         return self.compose_action_request(settings.ACTION_RESPONSE, data=data)
 
+    @staticmethod
+    def _print_help():
+        print('Поддерживаемые комманды:')
+        print('users - список известных пользователей')
+        print('connected - список подключённых пользователей')
+        print('history - история входов пользователя')
+        print('exit - завершение работы сервера.')
+        print('help - вывод справки по поддерживаемым командам')
+
+    def _interactive(self):
+        self._print_help()
+        while True:
+            command = input('Введите команду: ')
+            if command == 'users':
+                for user in self.db.get_users():
+                    print(user)
+            elif command == 'connected':
+                for connected in self.db.get_connections():
+                    print(f'{connected.user.username}, {connected.ip}:{connected.port}')
+            elif command == 'history':
+                for authorization in self.db.get_authorizations():
+                    print(f'{authorization.user.username}, {authorization.ip}:{authorization.port}, '
+                          f'{authorization.connection_time}')
+            elif command == 'help':
+                self._print_help()
+            elif command == 'exit':
+                time.sleep(0.5)
+                break
+            else:
+                print('Неизвестная команда. Воспользуйтесь help')
+
 
 if __name__ == '__main__':
     server = MsgServer.bind_from_args()
-    server.start_listen()
+    server.mainloop()
