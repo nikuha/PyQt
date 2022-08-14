@@ -1,14 +1,20 @@
 import json
+import os
 import socket
 import sys
 import select
 import argparse
 import threading
-import time
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QApplication, QMessageBox
+from configparser import ConfigParser
 import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ServerVerifier
 from common.descriptors import Port, Address
+from design.server.config_window import ConfigWindow
+from design.server.history_window import HistoryWindow
+from design.server.main_window import MainWindow
 from logs.settings.socket_logger import SocketLogger
 from db.server_db import ServerDB
 # from logs.settings.log_decorator import LogDecorator
@@ -22,10 +28,20 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         super().__init__()
         socket_logger = SocketLogger(settings.SERVER_LOGGER_NAME)
         self.logger = socket_logger.logger
+
         self.clients = []
         self.messages = []
         self.names = {}
-        self.db = ServerDB()
+
+        self.config = ConfigParser()
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        self.config.read(f"{dir_path}/{'server.ini'}")
+        self.db = ServerDB(os.path.join(self.config['SETTINGS']['db_path'],
+                                        self.config['SETTINGS']['db_file']))
+
+        self.new_connection = False
+        self.lock_flag = threading.Lock()
+        self.main_window = None
 
     @classmethod
     def bind_from_args(cls):
@@ -40,8 +56,20 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         sock.bind(address, port)
         return sock
 
+    @classmethod
+    def bind_from_config(cls):
+        sock = cls()
+        sock.bind()
+        return sock
+
     # @LogDecorator(settings.SERVER_LOGGER_NAME)
-    def bind(self, address, port):
+    def bind(self, address=None, port=None):
+        if not address:
+            address = self.config['SETTINGS']['listen_address']
+            if not address:
+                address = settings.DEFAULT_IP_ADDRESS
+        if not port:
+            port = self.config['SETTINGS']['listen_port']
         try:
             self.port = port
         except TypeError as e:
@@ -49,7 +77,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             sys.exit(1)
         self.address = address
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((address, port))
+        self.sock.bind((self.address, self.port))
         self.sock.settimeout(1)
         self.logger.info(f'Сервер запушен на {address}:{port}')
 
@@ -59,7 +87,70 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         client_listener.daemon = True
         client_listener.start()
 
-        self._interactive()
+        self._show_main_window()
+
+    def _show_main_window(self):
+        server_app = QApplication(sys.argv)
+
+        self.main_window = MainWindow(self._show_history_window, self._show_config_window)
+        self.main_window.show_status_message(f'Сервер запущен на {self.address}:{self.port}')
+        self._update_connections()
+
+        timer = QTimer()
+        timer.timeout.connect(self._update_connections)
+        timer.start(1000)
+
+        server_app.exec_()
+
+    def _get_history_data(self):
+        return [{
+            'username': el.username,
+            'sent': f'{el.sent}',
+            'received': f'{el.received}',
+            'time': f'{el.ru_dt}',
+        } for el in self.db.get_users()]
+
+    def _show_history_window(self):
+        HistoryWindow(self._get_history_data)
+
+    def _show_config_window(self):
+        self.config_window = ConfigWindow(os.path.realpath(
+            self.config['SETTINGS']['db_path']),
+            self.config['SETTINGS']['db_file'],
+            self.config['SETTINGS']['listen_port'],
+            self.config['SETTINGS']['listen_address'],
+            self._save_config
+        )
+
+    def _save_config(self):
+        message = QMessageBox()
+        self.config['SETTINGS']['db_path'] = self.config_window.db_path.text()
+        self.config['SETTINGS']['Database_file'] = self.config_window.db_file.text()
+        try:
+            port = int(self.config_window.port.text())
+            if not 1023 < port < 65535:
+                raise ValueError
+        except ValueError:
+            message.warning(self.config_window, 'Ошибка', 'Порт должен быть числом от 1024 до 65536')
+        else:
+            self.config['SETTINGS']['listen_address'] = self.config_window.ip.text()
+            self.config['SETTINGS']['listen_port'] = self.config_window.port.text()
+
+            with open('server.ini', 'w') as conf:
+                self.config.write(conf)
+                message.information(self.config_window, 'OK', 'Настройки успешно сохранены!')
+
+    def _update_connections(self):
+        if self.new_connection:
+            connections = [{
+                'username': el.user.username,
+                'ip': el.ip,
+                'port': f'{el.port}',
+                'time': f'{el.ru_dt}',
+            } for el in self.db.get_connections()]
+            self.main_window.fill_table(connections)
+            with self.lock_flag:
+                self.new_connection = False
 
     def _start_listen(self):
         self.sock.listen(settings.MAX_CONNECTIONS)
@@ -72,8 +163,6 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
                 except OSError:
                     pass
                 else:
-                    # self.logger.info(f'Соединение с клиентом: '
-                    #                  f'{client_address[0]}:{client_address[1]}')
                     self.clients.append(client_socket)
 
                 sender_list = []
@@ -130,6 +219,8 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             client_socket.close()
             if account_name := self._get_account_name_by_socket(client_socket):
                 self.db.user_logout(account_name)
+                with self.lock_flag:
+                    self.new_connection = True
             self.names = {key: value for (key, value) in self.names.items() if value != client_socket}
             self.clients.remove(client_socket)
 
@@ -160,7 +251,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             self.names[account_name] = client_socket
 
         if message[settings.REQUEST_ACTION] == settings.ACTION_PRESENCE:
-            self._process_presence(account_name)
+            self._process_presence(client_socket, account_name)
 
         elif message[settings.REQUEST_ACTION] == settings.ACTION_EXIT:
             self._close_client_socket(client_socket)
@@ -171,9 +262,12 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         else:
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACTION}!')
 
-    def _process_presence(self, account_name):
+    def _process_presence(self, client_socket, account_name):
         self.logger.info(f'Пользователь {account_name} онлайн')
-        self.db.user_login(account_name, self.address, self.port)
+        client_ip, client_port = client_socket.getpeername()
+        self.db.user_login(account_name, client_ip, client_port)
+        with self.lock_flag:
+            self.new_connection = True
         self.messages.append((account_name, self._compose_response(200, message='Вы онлайн.')))
 
     def _process_p2p_message(self, client_socket, message_from_client):
@@ -199,6 +293,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             settings.REQUEST_MESSAGE: msg
         })
         self.messages.append((recipient, message_to_client))
+        self.db.process_message(sender, recipient)
 
     def _process_error(self, client_socket, message):
         self.messages.append((client_socket, self._compose_response(400, message=message)))
@@ -209,38 +304,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             data[settings.RESPONSE_MESSAGE] = message
         return self.compose_action_request(settings.ACTION_RESPONSE, data=data)
 
-    @staticmethod
-    def _print_help():
-        print('Поддерживаемые комманды:')
-        print('users - список известных пользователей')
-        print('connected - список подключённых пользователей')
-        print('history - история входов пользователя')
-        print('exit - завершение работы сервера.')
-        print('help - вывод справки по поддерживаемым командам')
-
-    def _interactive(self):
-        self._print_help()
-        while True:
-            command = input('Введите команду: ')
-            if command == 'users':
-                for user in self.db.get_users():
-                    print(user)
-            elif command == 'connected':
-                for connected in self.db.get_connections():
-                    print(f'{connected.user.username}, {connected.ip}:{connected.port}')
-            elif command == 'history':
-                for authorization in self.db.get_authorizations():
-                    print(f'{authorization.user.username}, {authorization.ip}:{authorization.port}, '
-                          f'{authorization.connection_time}')
-            elif command == 'help':
-                self._print_help()
-            elif command == 'exit':
-                time.sleep(0.5)
-                break
-            else:
-                print('Неизвестная команда. Воспользуйтесь help')
-
 
 if __name__ == '__main__':
-    server = MsgServer.bind_from_args()
+    server = MsgServer.bind_from_config()
     server.mainloop()

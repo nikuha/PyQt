@@ -4,7 +4,7 @@ import logging
 DEFAULT_IP_ADDRESS = '127.0.0.1'
 
 # Порт по умолчанию
-DEFAULT_PORT = 7776
+DEFAULT_PORT = 7777
 
 # Максимальная длинна сообщения в байтах
 MAX_PACKAGE_LENGTH = 4096
