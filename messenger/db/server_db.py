@@ -135,6 +135,10 @@ class ServerDB:
             query = query.filter(self.Authorization.user.has(username=username))
         return query.all()
 
+    def get_contacts_by_username(self, username):
+        query = self.session.query(self.Contact).filter(self.Contact.user.has(username=username))
+        return query.all()
+
     def add_contact(self, user_name, contact_user_name):
         user = self.get_user_by_name(user_name)
         contact_user = self.get_user_by_name(contact_user_name)
@@ -203,5 +207,9 @@ if __name__ == '__main__':
     print('\n====== contacts for user1 after deleting =======')
     db.del_contact('user1', 'user2')
     for cont in user1.contacts:
+        print(cont.contact_user.username)
+
+    print('\n====== contacts by username =======')
+    for cont in db.get_contacts_by_username('user1'):
         print(cont.contact_user.username)
 

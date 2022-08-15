@@ -259,6 +259,12 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         elif message[settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
             self._process_p2p_message(client_socket, message)
 
+        elif message[settings.REQUEST_ACTION] == settings.ACTION_GET_USERS:
+            self._process_users(account_name)
+
+        elif message[settings.REQUEST_ACTION] == settings.ACTION_GET_CONTACTS:
+            self._process_contacts(account_name)
+
         else:
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACTION}!')
 
@@ -294,6 +300,20 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         })
         self.messages.append((recipient, message_to_client))
         self.db.process_message(sender, recipient)
+
+    def _process_users(self, account_name):
+        users = [user.username for user in self.db.get_users()]
+        message_to_client = self.compose_action_request(settings.ACTION_GET_USERS, data={
+            settings.REQUEST_USERS: users
+        })
+        self.messages.append((account_name, message_to_client))
+
+    def _process_contacts(self, account_name):
+        contacts = [contact.contact_user.username for contact in self.db.get_contacts_by_username(account_name)]
+        message_to_client = self.compose_action_request(settings.ACTION_GET_CONTACTS, data={
+            settings.REQUEST_CONTACTS: contacts
+        })
+        self.messages.append((account_name, message_to_client))
 
     def _process_error(self, client_socket, message):
         self.messages.append((client_socket, self._compose_response(400, message=message)))

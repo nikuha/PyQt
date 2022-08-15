@@ -1,11 +1,15 @@
+import os
 from sys import argv
 from PyQt5.QtGui import QIcon, QStandardItemModel, QStandardItem
 from PyQt5.QtWidgets import QMainWindow, QApplication, QAction, qApp, QLabel, QTableView, QHeaderView
 
 
 class MainWindow(QMainWindow):
+
     def __init__(self, show_history_window=None, show_config_window=None):
         super().__init__()
+
+        self.IMG_DIR = os.path.join(os.path.dirname(__file__), 'images')
 
         self.setFixedSize(800, 600)
         self.setWindowTitle('Сервер чата')
@@ -24,7 +28,7 @@ class MainWindow(QMainWindow):
         if show_config_window:
             config_btn.triggered.connect(show_config_window)
 
-        exit_btn = QAction(QIcon('images/exit.png'), 'Выход', self)
+        exit_btn = QAction(QIcon(f'{self.IMG_DIR}/exit.png'), 'Выход', self)
         exit_btn.setShortcut('Ctrl+Q')
         exit_btn.triggered.connect(qApp.quit)
         toolbar.addAction(exit_btn)
