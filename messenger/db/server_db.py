@@ -170,7 +170,7 @@ class ServerDB:
 
 
 if __name__ == '__main__':
-    db = ServerDB('test.sqlite3')
+    db = ServerDB('test_server.sqlite3')
     db.user_login('user1', '192.168.1.4', 8888)
     db.user_login('user2', '192.168.1.5', 7777)
     db.user_login('user3', '192.168.1.6', 4564)
