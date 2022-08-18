@@ -1,4 +1,5 @@
 import subprocess
+from time import sleep
 
 PROCESS = []
 
@@ -12,6 +13,7 @@ while True:
         PROCESS.append(subprocess.Popen('python server.py',
                                         creationflags=subprocess.CREATE_NEW_CONSOLE))
         for i in range(3):
+            sleep(.5)
             PROCESS.append(subprocess.Popen(f'python client.py -n user{i+1}',
                                             creationflags=subprocess.CREATE_NEW_CONSOLE))
     elif ACTION == 'x':

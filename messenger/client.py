@@ -8,7 +8,7 @@ import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ClientVerifier
 from common.descriptors import Port, Address
-from db.client_db import ClientDB
+from client.client_db import ClientDB
 from logs.settings.socket_logger import SocketLogger
 # from logs.settings.log_decorator import LogDecorator
 
@@ -89,7 +89,7 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
 
     def _init_db(self):
         filename = f'client_{self.account_name}.sqlite3'
-        self.db = ClientDB(os.path.join(os.getcwd(), 'db', filename))
+        self.db = ClientDB(os.path.join(os.getcwd(), 'client', filename))
         self._users_request()
         time.sleep(1)
         self._contacts_request()

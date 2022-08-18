@@ -12,11 +12,11 @@ import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ServerVerifier
 from common.descriptors import Port, Address
-from design.server.config_window import ConfigWindow
-from design.server.history_window import HistoryWindow
-from design.server.main_window import MainWindow
+from server.qt.config_window import ConfigWindow
+from server.qt.history_window import HistoryWindow
+from server.qt.main_window import MainWindow
 from logs.settings.socket_logger import SocketLogger
-from db.server_db import ServerDB
+from server.server_db import ServerDB
 # from logs.settings.log_decorator import LogDecorator
 
 
@@ -35,7 +35,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
 
         self.config = ConfigParser()
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        self.config.read(f"{dir_path}/{'server.ini'}")
+        self.config.read(f"{dir_path}/server/{'server.ini'}")
         self.db = ServerDB(os.path.join(self.config['SETTINGS']['db_path'],
                                         self.config['SETTINGS']['db_file']))
 
