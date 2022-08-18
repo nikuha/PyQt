@@ -1,14 +1,14 @@
-import random
+import os.path
 import sys
 import json
 import argparse
 import threading
 import time
-
 import common.settings as settings
 from common.tcp_socket import TCPSocket
 from common.meta import ClientVerifier
 from common.descriptors import Port, Address
+from client.client_db import ClientDB
 from logs.settings.socket_logger import SocketLogger
 # from logs.settings.log_decorator import LogDecorator
 
@@ -19,8 +19,16 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
 
     def __init__(self):
         super().__init__()
+
+        # self.sock.settimeout(1)
+
         socket_logger = SocketLogger(settings.CLIENT_LOGGER_NAME)
         self.logger = socket_logger.logger
+
+        self.sock_lock = threading.Lock()
+        self.db_lock = threading.Lock()
+
+        self.db = None
         self.user = None
 
     @classmethod
@@ -50,9 +58,14 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
             self.user = {settings.REQUEST_ACCOUNT_NAME: account_name}
             self.logger.info(f'Подключились к серверу {address}:{port}, пользователь {account_name}')
             self._send_presence()
+            self._init_db()
         except ConnectionRefusedError:
             self.logger.critical(f'Не удалось подключиться к серверу {address}:{port}')
             sys.exit(1)
+
+    @property
+    def account_name(self):
+        return self.user[settings.REQUEST_ACCOUNT_NAME]
 
     def mainloop(self):
 
@@ -74,10 +87,16 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
             receiver.join()
             self._close()
 
+    def _init_db(self):
+        filename = f'client_{self.account_name}.sqlite3'
+        self.db = ClientDB(os.path.join(os.getcwd(), 'client', filename))
+        self._users_request()
+        time.sleep(1)
+        self._contacts_request()
+
     def _send_presence(self):
         self.send_message(self.sock, self._action_request(settings.ACTION_PRESENCE))
         self.logger.info(self._get_message_response())
-        time.sleep(.5)
 
     def _close(self, reason='client'):
         self.sock.close()
@@ -92,19 +111,33 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         sys.exit(1)
 
     def _get_message_response(self):
+        # with self.sock_lock:
         try:
             message = self.get_message(self.sock)
             # self.logger.info(message)
             if settings.REQUEST_ACTION not in message:
                 raise ValueError(settings.REQUEST_ACTION)
+
             if message[settings.REQUEST_ACTION] == settings.ACTION_RESPONSE:
                 if settings.REQUEST_DATA not in message:
                     raise ValueError(settings.REQUEST_DATA)
                 return self._get_response(message[settings.REQUEST_DATA])
+
             if message[settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
                 if settings.REQUEST_DATA not in message:
                     raise ValueError(settings.REQUEST_DATA)
                 return self._get_p2p_message(message[settings.REQUEST_DATA])
+
+            if message[settings.REQUEST_ACTION] == settings.ACTION_GET_USERS:
+                if settings.REQUEST_DATA not in message:
+                    raise ValueError(settings.REQUEST_DATA)
+                return self._get_users(message[settings.REQUEST_DATA])
+
+            if message[settings.REQUEST_ACTION] == settings.ACTION_GET_CONTACTS:
+                if settings.REQUEST_DATA not in message:
+                    raise ValueError(settings.REQUEST_DATA)
+                return self._get_contacts(message[settings.REQUEST_DATA])
+
             raise ValueError
         except (OSError, ConnectionError, ConnectionAbortedError, ConnectionResetError):
             self._lost_connection()
@@ -139,6 +172,26 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         except (ValueError, json.JSONDecodeError):
             return 'Неизвестный статус ответа сервера!'
 
+    def _get_users(self, data):
+        try:
+            if not (settings.REQUEST_USERS in data):
+                raise ValueError
+            self.db.add_users(data[settings.REQUEST_USERS])
+            return None
+        except (ValueError, json.JSONDecodeError):
+            return 'Неизвестный статус ответа сервера!'
+
+    def _get_contacts(self, data):
+        try:
+            if not (settings.REQUEST_CONTACTS in data):
+                raise ValueError
+            for contact in data[settings.REQUEST_CONTACTS]:
+                self.db.add_contact(contact)
+            return None
+        except (ValueError, json.JSONDecodeError):
+            return 'Неизвестный статус ответа сервера!'
+
+
     @staticmethod
     def _print_help():
         print('Поддерживаемые команды:')
@@ -153,20 +206,40 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
             settings.REQUEST_RECIPIENT: recipient,
             settings.REQUEST_MESSAGE: input_message
         })
+        with self.db_lock:
+            self.db.save_message(self.account_name, recipient, input_message)
+        # with self.sock_lock:
         try:
             self.send_message(self.sock, message)
         except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
             self._lost_connection()
 
     def _exit_message(self):
+        # with self.sock_lock:
         try:
             self.send_message(self.sock, self._action_request(settings.ACTION_EXIT))
         except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
             self._lost_connection()
 
+    def _users_request(self):
+        # with self.sock_lock:
+        try:
+            self.send_message(self.sock, self._action_request(settings.ACTION_GET_USERS))
+        except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
+            self._lost_connection()
+
+    def _contacts_request(self):
+        # with self.sock_lock:
+        try:
+            request = self._action_request(settings.ACTION_GET_CONTACTS)
+            self.send_message(self.sock, request)
+        except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
+            self._lost_connection()
+
     def _getting_server_messages(self):
         while True:
-            time.sleep(0.5)
+            time.sleep(1)
+            # with self.sock_lock:
             if response := self._get_message_response():
                 self.logger.info(response)
 

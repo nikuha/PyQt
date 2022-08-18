@@ -4,7 +4,7 @@ import logging
 DEFAULT_IP_ADDRESS = '127.0.0.1'
 
 # Порт по умолчанию
-DEFAULT_PORT = 7776
+DEFAULT_PORT = 7777
 
 # Максимальная длинна сообщения в байтах
 MAX_PACKAGE_LENGTH = 4096
@@ -26,6 +26,8 @@ ACTION_PRESENCE = 'presence'
 ACTION_P2P_MESSAGE = 'p2p_message'
 ACTION_RESPONSE = 'response'
 ACTION_EXIT = 'exit'
+ACTION_GET_USERS = 'get_users'
+ACTION_GET_CONTACTS = 'get_contacts'
 
 # параметры запроса
 REQUEST_ACTION = 'action'
@@ -36,6 +38,8 @@ REQUEST_ACCOUNT_NAME = 'account_name'
 REQUEST_RECIPIENT = 'recipient'
 REQUEST_SENDER = 'sender'
 REQUEST_MESSAGE = 'message'
+REQUEST_USERS = 'users'
+REQUEST_CONTACTS = 'contacts'
 
 # параметры ответа
 RESPONSE_STATUS = 'status'
