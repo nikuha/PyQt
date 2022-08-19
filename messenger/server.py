@@ -5,6 +5,8 @@ import sys
 import select
 import argparse
 import threading
+import time
+
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from configparser import ConfigParser
@@ -177,15 +179,16 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
                     for client_socket in sender_list:
                         try:
                             message = self.get_message(client_socket)
-                            self._process_message_from_client(client_socket, message)
                         except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
                             self._close_client_socket(client_socket)
                         except json.JSONDecodeError:
                             self.logger.error(f'Неверный запрос от клиента: {client_socket}')
                             self._close_client_socket(client_socket)
+                        else:
+                            self._process_message_from_client(client_socket, message)
 
                 while self.messages:
-                    message_tuple = self.messages.pop()
+                    message_tuple = self.messages.pop(0)
                     try:
                         self._process_message_to_client(message_tuple, recipient_list)
                     except (ConnectionResetError, ConnectionError, ConnectionAbortedError):
@@ -265,6 +268,12 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         elif message[settings.REQUEST_ACTION] == settings.ACTION_GET_CONTACTS:
             self._process_contacts(account_name)
 
+        elif message[settings.REQUEST_ACTION] == settings.ACTION_ADD_CONTACT:
+            self._process_contact(client_socket, account_name, message, 'add')
+
+        elif message[settings.REQUEST_ACTION] == settings.ACTION_DEL_CONTACT:
+            self._process_contact(client_socket, account_name, message, 'del')
+
         else:
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACTION}!')
 
@@ -274,7 +283,8 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         self.db.user_login(account_name, client_ip, client_port)
         with self.lock_flag:
             self.new_connection = True
-        self.messages.append((account_name, self._compose_response(200, message='Вы онлайн.')))
+        response = self.compose_action_request(settings.ACTION_PRESENCE)
+        self.messages.append((account_name, response))
 
     def _process_p2p_message(self, client_socket, message_from_client):
         if settings.REQUEST_DATA not in message_from_client:
@@ -312,6 +322,25 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         contacts = [contact.contact_user.username for contact in self.db.get_contacts_by_username(account_name)]
         message_to_client = self.compose_action_request(settings.ACTION_GET_CONTACTS, data={
             settings.REQUEST_CONTACTS: contacts
+        })
+        self.messages.append((account_name, message_to_client))
+
+    def _process_contact(self, client_socket, account_name, message_from_client, mode):
+        if settings.REQUEST_DATA not in message_from_client:
+            self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_DATA}!')
+            return
+        if settings.REQUEST_USERNAME not in message_from_client[settings.REQUEST_DATA]:
+            self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_USERNAME}!')
+            return
+        contact_user_name = message_from_client[settings.REQUEST_DATA][settings.REQUEST_USERNAME]
+        if mode == 'del':
+            self.db.del_contact(account_name, contact_user_name)
+            action = settings.ACTION_DEL_CONTACT
+        else:
+            self.db.add_contact(account_name, contact_user_name)
+            action = settings.ACTION_ADD_CONTACT
+        message_to_client = self.compose_action_request(action, data={
+            settings.REQUEST_USERNAME: contact_user_name
         })
         self.messages.append((account_name, message_to_client))
 

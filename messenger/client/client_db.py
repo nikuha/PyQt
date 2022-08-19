@@ -91,8 +91,14 @@ class ClientDB:
     def get_contacts(self):
         return self.session.query(self.Contact).all()
 
-    def get_users(self):
-        return self.session.query(self.User).all()
+    def get_users(self, exception_name=None):
+        query = self.session.query(self.User)
+        if exception_name:
+            user = self.session.query(self.User).filter_by(username=exception_name).first()
+            ids = [contact.contact_user_id for contact in self.get_contacts()]
+            ids.append(user.id)
+            query = query.filter(self.User.id.notin_(ids))
+        return query.all()
 
     def get_messages(self, sender_id=None, recipient_id=None):
         query = self.session.query(self.Message)
