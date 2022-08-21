@@ -5,7 +5,7 @@ import argparse
 import threading
 import time
 
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, QObject, QTimer
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
 import common.settings as settings
@@ -18,25 +18,30 @@ from client.client_db import ClientDB
 from logs.settings.socket_logger import SocketLogger
 
 
-class MsgClient(TCPSocket, metaclass=ClientVerifier):
+class MsgClient(TCPSocket, QObject):
     port = Port()
     address = Address()
-    connection_lost = pyqtSignal()
+    lost_connection_signal = pyqtSignal()
+    load_data_signal = pyqtSignal(list, list)
+    fill_chat_signal = pyqtSignal(str, list, bool)
+    status_message_signal = pyqtSignal(str, bool)
+    unlock_message_components_signal = pyqtSignal()
 
     def __init__(self):
-        super().__init__()
+        TCPSocket.__init__(self)
+        QObject.__init__(self)
 
         socket_logger = SocketLogger(settings.CLIENT_LOGGER_NAME)
         self.logger = socket_logger.logger
-
-        self.db_lock = threading.Lock()
 
         self.db = None
         self.user = {settings.REQUEST_ACCOUNT_NAME: None}
         self.main_window = None
 
         self.to_server_messages = []
-        self.wait_flag = None
+        self.sending_wait_flag = None
+        self.receiving_stop_flag = False
+        self.users_loaded_flag = False
 
     @classmethod
     def connect_from_args(cls):
@@ -87,8 +92,6 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
 
         self._init_db()
 
-        self.main_window = MainWindow(self._add_contact_request, self._del_contact_request)
-
         sender = threading.Thread(target=self._sending_server_messages)
         sender.daemon = True
         sender.start()
@@ -97,9 +100,24 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         recipient.daemon = True
         recipient.start()
 
+        self.main_window = MainWindow(self._add_contact_request, self._del_contact_request,
+                                      self._load_user_chat, self._create_message)
+        self.main_window.make_connection({
+            'lost_connection_signal': self.lost_connection_signal,
+            'load_data_signal': self.load_data_signal,
+            'fill_chat_signal': self.fill_chat_signal,
+            'status_message_signal': self.status_message_signal,
+            'unlock_message_components_signal': self.unlock_message_components_signal
+        })
+
         self._send_presence()
         self._users_request()
         self._contacts_request()
+
+        # автоматическое обновление списка доступных пользователей
+        # timer = QTimer()
+        # timer.timeout.connect(self._users_request)
+        # timer.start(10000)
 
         client_app.exec_()
 
@@ -114,7 +132,7 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
     def _sending_server_messages(self):
         while True:
             time.sleep(0.5)
-            if (not self.wait_flag) and self.to_server_messages:
+            if (not self.sending_wait_flag) and self.to_server_messages:
                 message = self.to_server_messages.pop(0)
                 try:
                     self.send_message(self.sock, message)
@@ -122,16 +140,14 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
                     self._lost_connection()
                 else:
                     if settings.REQUEST_ACTION in message:
-                        # if message[settings.REQUEST_ACTION] in [
-                        #     settings.ACTION_PRESENCE, settings.ACTION_GET_USERS, settings.ACTION_GET_CONTACTS
-                        # ]:
-                        self.wait_flag = message[settings.REQUEST_ACTION]
+                        self.sending_wait_flag = message[settings.REQUEST_ACTION]
 
     def _receiving_server_messages(self):
         while True:
             time.sleep(0.2)
-            if response := self._get_message_response():
-                self.logger.info(response)
+            if not self.receiving_stop_flag:
+                if response := self._get_message_response():
+                    self.logger.info(response)
 
     def _get_message_response(self):
         try:
@@ -141,8 +157,8 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
                 raise ValueError(settings.REQUEST_ACTION)
 
             # print(f'={message[settings.REQUEST_ACTION]}')
-            if self.wait_flag == message[settings.REQUEST_ACTION]:
-                self.wait_flag = None
+            if self.sending_wait_flag == message[settings.REQUEST_ACTION]:
+                self.sending_wait_flag = None
 
             if message[settings.REQUEST_ACTION] == settings.ACTION_RESPONSE:
                 if settings.REQUEST_DATA not in message:
@@ -150,7 +166,7 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
                 return self._get_response(message[settings.REQUEST_DATA])
 
             elif message[settings.REQUEST_ACTION] == settings.ACTION_PRESENCE:
-                self.main_window.show_status_message(self.account_name)
+                self._clear_status_message()
                 return f'{self.account_name} Online'
 
             elif message[settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
@@ -205,13 +221,38 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         except (ValueError, json.JSONDecodeError):
             return 'Неизвестный статус ответа сервера!'
 
+    def _create_message(self, username, text):
+        request = self._action_request(settings.ACTION_P2P_MESSAGE, data={
+            settings.REQUEST_RECIPIENT: username,
+            settings.REQUEST_MESSAGE: text
+        })
+        self.to_server_messages.append(request)
+
     def _get_p2p_message(self, data):
         try:
-            if not (settings.RESPONSE_MESSAGE in data and settings.REQUEST_SENDER in data):
-                raise ValueError
-            print(f'\nСообщение от {data[settings.REQUEST_SENDER]}: \n' +
-                  f'{data[settings.RESPONSE_MESSAGE]}')
-            self.main_window.message_field.insertHtml(f'{data[settings.REQUEST_SENDER]}: {data[settings.RESPONSE_MESSAGE]}')
+            if settings.REQUEST_STATUS in data:
+                if data[settings.REQUEST_STATUS] == 200:
+                    self.db.save_message(self.account_name,
+                                         data[settings.REQUEST_RECIPIENT],
+                                         data[settings.REQUEST_MESSAGE])
+                    self._load_user_chat(data[settings.REQUEST_RECIPIENT], True)
+                    self._clear_status_message()
+                elif data[settings.REQUEST_STATUS] == 400:
+                    self.status_message_signal.emit(f'Ошибка отправки: {data[settings.REQUEST_MESSAGE]}', True)
+                self.unlock_message_components_signal.emit()
+            else:
+                if not (settings.RESPONSE_MESSAGE in data and settings.REQUEST_SENDER in data):
+                    raise ValueError
+                sender_username = data[settings.REQUEST_SENDER]
+                user = self.db.get_user_by_name(sender_username)
+                if not user:
+                    self.db.add_users([sender_username])
+
+                self.db.save_message(sender_username,
+                                     self.account_name,
+                                     data[settings.REQUEST_MESSAGE])
+
+                self._load_user_chat(sender_username, True)
             return None
         except (ValueError, json.JSONDecodeError):
             return 'Неизвестный статус ответа сервера!'
@@ -224,6 +265,10 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
             return 'Неизвестный статус ответа сервера!'
         else:
             self.db.add_users(data[settings.REQUEST_USERS])
+            # if self.users_loaded_flag:
+            #     users = [user.username for user in self.db.get_users(self.account_name)]
+            #     self.load_data_signal.emit([None], sorted(users))
+            # self.users_loaded_flag = True
             return None
 
     def _get_contacts(self, data):
@@ -242,12 +287,9 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         if not contacts:
             contacts = [contact.contact_user.username for contact in self.db.get_contacts()]
         contacts.sort()
-
-        self.main_window.fill_contacts_list(contacts)
-        self.main_window.fill_del_selector(contacts)
-
         users = [user.username for user in self.db.get_users(self.account_name)]
-        self.main_window.fill_add_selector(sorted(users))
+
+        self.load_data_signal.emit(contacts, sorted(users))
 
     def _add_contact_request(self, username):
         request = self.compose_action_request(settings.ACTION_ADD_CONTACT, data={
@@ -258,6 +300,7 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
     def _proc_add_contact(self, username):
         self.db.add_contact(username)
         self._update_window_contacts()
+        self._clear_status_message()
 
     def _del_contact_request(self, username):
         request = self.compose_action_request(settings.ACTION_DEL_CONTACT, data={
@@ -268,6 +311,18 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
     def _proc_del_contact(self, username):
         self.db.del_contact(username)
         self._update_window_contacts()
+        self._clear_status_message()
+
+    def _load_user_chat(self, username, clear_field):
+        messages = []
+        for message_item in self.db.get_messages(username=username):
+            position = 'right' if message_item.sender.username == self.account_name else 'left'
+            item = {
+                'position': position,
+                'text': f'{message_item.sender.username} {message_item.ru_dt}\n{message_item.message}'
+            }
+            messages.append(item)
+        self.fill_chat_signal.emit(username, messages, clear_field)
 
     def _users_request(self):
         request = self._action_request(settings.ACTION_GET_USERS)
@@ -277,10 +332,13 @@ class MsgClient(TCPSocket, metaclass=ClientVerifier):
         request = self._action_request(settings.ACTION_GET_CONTACTS)
         self.to_server_messages.append(request)
 
+    def _clear_status_message(self):
+        self.status_message_signal.emit(self.account_name, False)
+
     def _lost_connection(self):
         self.logger.error(f'Соединение с сервером было потеряно.')
-        message = QMessageBox()
-        message.warning(self.main_window, 'Ошибка', 'Соединение с сервером было потеряно')
+        self.receiving_stop_flag = True
+        self.lost_connection_signal.emit()
 
 
 if __name__ == '__main__':

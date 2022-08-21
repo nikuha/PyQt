@@ -43,6 +43,7 @@ REQUEST_MESSAGE = 'message'
 REQUEST_USERS = 'users'
 REQUEST_CONTACTS = 'contacts'
 REQUEST_USERNAME = 'username'
+REQUEST_STATUS = 'status'
 
 # параметры ответа
 RESPONSE_STATUS = 'status'

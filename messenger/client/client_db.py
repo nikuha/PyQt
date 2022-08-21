@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, create_engine
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, create_engine, or_
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 
@@ -30,6 +30,10 @@ class ClientDB:
             self.recipient_id = recipient_id
             self.message = message
             self.created_dt = datetime.now()
+
+        @property
+        def ru_dt(self):
+            return ClientDB.get_ru_dt(self.created_dt)
 
     class Contact(Base):
         __tablename__ = 'contacts'
@@ -91,6 +95,9 @@ class ClientDB:
     def get_contacts(self):
         return self.session.query(self.Contact).all()
 
+    def get_contact_by_name(self, contact_user):
+        return self.session.query(self.Contact).filter_by(contact_user_id=contact_user.id).first()
+
     def get_users(self, exception_name=None):
         query = self.session.query(self.User)
         if exception_name:
@@ -100,16 +107,26 @@ class ClientDB:
             query = query.filter(self.User.id.notin_(ids))
         return query.all()
 
-    def get_messages(self, sender_id=None, recipient_id=None):
+    def get_messages(self, sender_id=None, recipient_id=None, username=None):
         query = self.session.query(self.Message)
         if sender_id:
             query = query.filter_by(sender_id=sender_id)
         if recipient_id:
             query = query.filter_by(recipient_id=recipient_id)
-        return query.all()
+        if username:
+            user = self.get_user_by_name(username)
+            query = query.filter(or_(self.Message.sender_id == user.id, self.Message.recipient_id == user.id))
+        return query.order_by(self.Message.created_dt).all()
 
     def get_user_by_name(self, username):
         return self.session.query(self.User).filter_by(username=username).first()
+
+    @staticmethod
+    def get_ru_dt(dt_field):
+        dt = f'{dt_field}'.split(' ')
+        d = dt[0].split('-')
+        t = dt[1][:5]
+        return f'{t} {d[2]}.{d[1]}.{d[0]}'
 
 
 if __name__ == '__main__':
@@ -136,7 +153,8 @@ if __name__ == '__main__':
 
     db.save_message('test1', 'test2', f'тестовое сообщение1')
     db.save_message('test2', 'test1', f'тестовое сообщение2')
+    db.save_message('test1', 'test3', f'тестовое сообщение3')
 
     print('\n====== messages =======')
-    for message_item in db.get_messages():
-        print(f'{message_item.sender.username} -> {message_item.recipient.username}: {message_item.message}')
+    for message_item in db.get_messages(username='test2'):
+        print(f'{message_item.created_dt} {message_item.sender.username} -> {message_item.recipient.username}: {message_item.message}')

@@ -138,7 +138,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             self.config['SETTINGS']['listen_address'] = self.config_window.ip.text()
             self.config['SETTINGS']['listen_port'] = self.config_window.port.text()
 
-            with open('server.ini', 'w') as conf:
+            with open('server/server.ini', 'w') as conf:
                 self.config.write(conf)
                 message.information(self.config_window, 'OK', 'Настройки успешно сохранены!')
 
@@ -236,9 +236,9 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             account_name = None
         if client_socket in recipient_list:
             self.send_message(client_socket, message_tuple[1])
-            if account_name:
-                if message_tuple[1][settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
-                    self.logger.info(f'Сообщение отправлено пользователю {account_name}.')
+            # if account_name:
+            #     if message_tuple[1][settings.REQUEST_ACTION] == settings.ACTION_P2P_MESSAGE:
+            #         self.logger.info(f'Сообщение отправлено пользователю {account_name}.')
         else:
             self._close_client_socket(client_socket)
 
@@ -301,14 +301,29 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         sender = self.get_name_from_message(message_from_client)
         msg = message_from_client[settings.REQUEST_DATA][settings.REQUEST_MESSAGE]
         if recipient not in self.names:
-            self._process_error(client_socket, f'Пользователь с указанным именем не найден!')
+            message_to_sender = self.compose_action_request(
+                settings.ACTION_P2P_MESSAGE,
+                data={settings.REQUEST_STATUS: 400, settings.REQUEST_MESSAGE: 'Польватель не в сети!'}
+            )
+            self.messages.append((sender, message_to_sender))
             return
 
-        message_to_client = self.compose_action_request(settings.ACTION_P2P_MESSAGE, data={
+        message_to_sender = self.compose_action_request(
+            settings.ACTION_P2P_MESSAGE,
+            data={
+                settings.REQUEST_STATUS: 200,
+                settings.REQUEST_RECIPIENT: recipient,
+                settings.REQUEST_MESSAGE: msg
+            }
+        )
+        self.messages.append((client_socket, message_to_sender))
+
+        message_to_recipient = self.compose_action_request(settings.ACTION_P2P_MESSAGE, data={
             settings.REQUEST_SENDER: sender,
             settings.REQUEST_MESSAGE: msg
         })
-        self.messages.append((recipient, message_to_client))
+        self.messages.append((recipient, message_to_recipient))
+
         self.db.process_message(sender, recipient)
 
     def _process_users(self, account_name):
