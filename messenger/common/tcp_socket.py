@@ -1,7 +1,9 @@
+import binascii
+import hashlib
 import json
 import time
 import socket
-from .settings import MAX_PACKAGE_LENGTH, ENCODING, REQUEST_ACCOUNT_NAME
+from .settings import MAX_PACKAGE_LENGTH, ENCODING, REQUEST_ACCOUNT_NAME, REQUEST_PASSWORD
 from .settings import REQUEST_ACTION, REQUEST_TIME, REQUEST_USER, REQUEST_DATA
 
 
@@ -48,3 +50,19 @@ class TCPSocket:
             return name
         except ValueError:
             return None
+
+    @staticmethod
+    def get_password_from_message(message):
+        try:
+            password_hash = message[REQUEST_USER][REQUEST_PASSWORD]
+            return password_hash
+        except ValueError:
+            return None
+
+    @staticmethod
+    def get_password_hash(username, password):
+        passwd_bytes = password.encode('utf-8')
+        salt = username.lower().encode('utf-8')
+        password_hash_b = hashlib.pbkdf2_hmac('sha256', passwd_bytes, salt, 1000)
+        password_hash = binascii.hexlify(password_hash_b)
+        return password_hash

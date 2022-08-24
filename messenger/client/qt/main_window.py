@@ -203,9 +203,11 @@ class MainWindow(QMainWindow):
         self.contacts_list.setCurrentIndex(contact_item)
         self._unlock_message_components()
 
-    @pyqtSlot()
-    def _lost_connection_slot(self):
-        self.messages.warning(self, 'Сбой соединения', 'Потеряно соединение с сервером. ')
+    @pyqtSlot(dict)
+    def _lost_connection_slot(self, data):
+        title = data['title'] if 'title' in data else 'Сбой соединения'
+        message = data['message'] if 'title' in data else 'Потеряно соединение с сервером. '
+        self.messages.critical(self, title, message)
         self.close()
 
     @pyqtSlot(list, list)
