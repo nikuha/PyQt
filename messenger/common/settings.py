@@ -28,6 +28,8 @@ ACTION_RESPONSE = 'response'
 ACTION_EXIT = 'exit'
 ACTION_GET_USERS = 'get_users'
 ACTION_GET_CONTACTS = 'get_contacts'
+ACTION_ADD_CONTACT = 'add_contact'
+ACTION_DEL_CONTACT = 'del_contact'
 
 # параметры запроса
 REQUEST_ACTION = 'action'
@@ -40,6 +42,8 @@ REQUEST_SENDER = 'sender'
 REQUEST_MESSAGE = 'message'
 REQUEST_USERS = 'users'
 REQUEST_CONTACTS = 'contacts'
+REQUEST_USERNAME = 'username'
+REQUEST_STATUS = 'status'
 
 # параметры ответа
 RESPONSE_STATUS = 'status'
