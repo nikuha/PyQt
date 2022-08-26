@@ -2,7 +2,7 @@ import os
 import sys
 from unittest import mock, TestCase, main as unittest_main
 sys.path.append(os.path.join(os.getcwd(), '..'))
-from client import MyClient
+from msg_client import MsgClient
 import common.settings as settings
 import json
 
@@ -11,7 +11,7 @@ class TestClient(TestCase):
     def setUp(self):
         with mock.patch('socket.socket') as mock_socket:
             self.mock_socket = mock_socket
-            self.client = MyClient()
+            self.client = MsgClient()
 
     def mock_byte_response(self, dict_response: dict):
         """Имитируем получение байтовых данных"""
