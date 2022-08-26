@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, backref
 from datetime import datetime
 
@@ -10,15 +10,19 @@ class ServerDB:
         __tablename__ = 'users'
         id = Column(Integer, primary_key=True)
         username = Column(String, unique=True)
+        password_hash = Column(String)
         last_connection_time = Column(DateTime)
         sent = Column(Integer)
         received = Column(Integer)
+        pubkey = Column('pubkey', Text)
 
-        def __init__(self, username):
+        def __init__(self, username, password_hash):
             self.username = username
+            self.password_hash = password_hash
             self.last_connection_time = datetime.now()
             self.sent = 0
             self.received = 0
+            self.pubkey = None
 
         @property
         def ru_dt(self):
@@ -75,7 +79,7 @@ class ServerDB:
             self.contact_user_id = contact_user_id
 
     def __init__(self, db_path):
-        uri = 'sqlite:///{}'.format(db_path)
+        uri = f'sqlite:///{db_path}'
         self.engine = create_engine(uri, echo=False, pool_recycle=7200,
                                     connect_args={'check_same_thread': False})
         self.Base.metadata.create_all(self.engine)
@@ -86,14 +90,13 @@ class ServerDB:
         self.session.query(self.Connection).delete()
         self.session.commit()
 
-    def user_login(self, username, ip, port):
+    def user_login(self, username, password_hash, ip, port):
         user = self.get_user_by_name(username)
-        if user:
-            user.last_connection_time = datetime.now()
-        else:
-            user = self.User(username)
-            self.session.add(user)
-            self.session.commit()
+        if not user:
+            return f'Неверное имя пользователя.'
+        if user.password_hash != password_hash:
+            return f'Неверный пароль.'
+        user.last_connection_time = datetime.now()
 
         connection = self.Connection(user.id, ip, port, datetime.now())
         self.session.add(connection)
@@ -102,19 +105,19 @@ class ServerDB:
         self.session.add(history)
 
         self.session.commit()
+        return True
 
     def user_logout(self, username):
         # не работает в один запрос (почему? all() с таким фильтром работает)
         # self.session.query(self.Online).filter(self.Online.user.has(username=username)).delete()
 
         # так работает, но получается тоже 2 запроса
-        connection = self.session.query(self.Connection).filter(self.Connection.user.has(username=username)).first()
-        self.session.delete(connection)
+        # connection = self.session.query(self.Connection).filter(self.Connection.user.has(username=username)).first()
+        # self.session.delete(connection)
 
-        # user = self.session.query(self.User).filter_by(username=username).first()
-        # self.session.query(self.Online).filter_by(user_id=user.id).delete()
-
-        self.session.commit()
+        if user := self.get_user_by_name(username):
+            self.session.query(self.Connection).filter_by(user_id=user.id).delete()
+            self.session.commit()
 
     def process_message(self, sender_name, recipient_name):
         sender = self.get_user_by_name(sender_name)
@@ -162,6 +165,24 @@ class ServerDB:
             self.session.delete(contact)
             self.session.commit()
 
+    def del_user(self, username):
+        if user := self.get_user_by_name(username):
+            self.session.query(self.Authorization).filter_by(user_id=user.id).delete()
+            self.session.query(self.Connection).filter_by(user_id=user.id).delete()
+            self.session.query(self.Contact).filter_by(user_id=user.id).delete()
+            self.session.query(self.Contact).filter_by(contact_user_id=user.id).delete()
+            self.session.query(self.User).filter_by(id=user.id).delete()
+            self.session.commit()
+            return True
+        return False
+
+    def add_user(self, username, password_hash):
+        if self.get_user_by_name(username):
+            return
+        user = self.User(username, password_hash)
+        self.session.add(user)
+        self.session.commit()
+
     def get_user_by_name(self, username):
         return self.session.query(self.User).filter_by(username=username).first()
 
@@ -175,6 +196,11 @@ class ServerDB:
 
 if __name__ == '__main__':
     db = ServerDB('test_server.sqlite3')
+
+    db.add_user('user1', '123456')
+    db.add_user('user2', '123456')
+    db.add_user('user3', '123456')
+
     db.user_login('user1', '192.168.1.4', 8888)
     db.user_login('user2', '192.168.1.5', 7777)
     db.user_login('user3', '192.168.1.6', 4564)

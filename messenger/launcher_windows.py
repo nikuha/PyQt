@@ -15,7 +15,7 @@ while True:
 
         for i in range(2):
             sleep(.5)
-            PROCESS.append(subprocess.Popen(f'python client.py -n user{i+1}',
+            PROCESS.append(subprocess.Popen(f'python client.py -n user{i+1} -p 123456',
                                             creationflags=subprocess.CREATE_NEW_CONSOLE))
     elif ACTION == 'x':
         while PROCESS:

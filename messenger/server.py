@@ -5,7 +5,6 @@ import sys
 import select
 import argparse
 import threading
-import time
 
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QMessageBox
@@ -17,6 +16,7 @@ from common.descriptors import Port, Address
 from server.qt.config_window import ConfigWindow
 from server.qt.history_window import HistoryWindow
 from server.qt.main_window import MainWindow
+from server.qt.users_window import UsersWindow
 from logs.settings.socket_logger import SocketLogger
 from server.server_db import ServerDB
 # from logs.settings.log_decorator import LogDecorator
@@ -94,7 +94,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
     def _show_main_window(self):
         server_app = QApplication(sys.argv)
 
-        self.main_window = MainWindow(self._show_history_window, self._show_config_window)
+        self.main_window = MainWindow(self._show_history_window, self._show_config_window, self._show_users_window)
         self.main_window.show_status_message(f'Сервер запущен на {self.address}:{self.port}')
         self._update_connections()
 
@@ -114,6 +114,22 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
 
     def _show_history_window(self):
         HistoryWindow(self._get_history_data)
+
+    def _show_users_window(self):
+        self.users_window = UsersWindow(self._add_user, self._del_user, self._get_del_users_list)
+
+    def _get_del_users_list(self):
+        return sorted([el.username for el in self.db.get_users()])
+
+    def _add_user(self, username, password):
+        if self.db.get_user_by_name(username):
+            return f'Пользователь {username} уже существует!'
+        password_hash = self.get_password_hash(username, password)
+        self.db.add_user(username, password_hash)
+        return True
+
+    def _del_user(self, username):
+        return self.db.del_user(username)
 
     def _show_config_window(self):
         self.config_window = ConfigWindow(os.path.realpath(
@@ -247,14 +263,22 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         for param in [settings.REQUEST_ACTION, settings.REQUEST_TIME, settings.REQUEST_USER]:
             if not (param in message):
                 self._process_error(client_socket, f'Неверный параметр {param}!')
+                return
 
         if not (account_name := self.get_name_from_message(message)):
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACCOUNT_NAME}!')
+            return
         if account_name not in self.names.keys():
             self.names[account_name] = client_socket
 
+        password = None
+        if message[settings.REQUEST_ACTION] in [settings.ACTION_PRESENCE]:
+            if not (password := self.get_password_from_message(message)):
+                self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACCOUNT_NAME}!')
+                return
+
         if message[settings.REQUEST_ACTION] == settings.ACTION_PRESENCE:
-            self._process_presence(client_socket, account_name)
+            self._process_presence(client_socket, account_name, password)
 
         elif message[settings.REQUEST_ACTION] == settings.ACTION_EXIT:
             self._close_client_socket(client_socket)
@@ -277,10 +301,14 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         else:
             self._process_error(client_socket, f'Неверный параметр {settings.REQUEST_ACTION}!')
 
-    def _process_presence(self, client_socket, account_name):
-        self.logger.info(f'Пользователь {account_name} онлайн')
+    def _process_presence(self, client_socket, account_name, password):
         client_ip, client_port = client_socket.getpeername()
-        self.db.user_login(account_name, client_ip, client_port)
+        password_hash = self.get_password_hash(account_name, password)
+        login_result = self.db.user_login(account_name, password_hash, client_ip, client_port)
+        if login_result is not True:
+            self._process_error(client_socket, login_result)
+            return
+        self.logger.info(f'Пользователь {account_name} онлайн')
         with self.lock_flag:
             self.new_connection = True
         response = self.compose_action_request(settings.ACTION_PRESENCE)

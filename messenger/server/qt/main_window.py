@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QAction, qApp, QLabel, QT
 
 class MainWindow(QMainWindow):
 
-    def __init__(self, show_history_window=None, show_config_window=None):
+    def __init__(self, show_history_window=None, show_config_window=None, show_users_window=None):
         super().__init__()
 
         self.IMG_DIR = os.path.join(os.path.dirname(__file__), 'images')
@@ -27,6 +27,11 @@ class MainWindow(QMainWindow):
         toolbar.addAction(config_btn)
         if show_config_window:
             config_btn.triggered.connect(show_config_window)
+
+        users_button = QAction('Управление пользователями', self)
+        toolbar.addAction(users_button)
+        if show_users_window:
+            users_button.triggered.connect(show_users_window)
 
         exit_btn = QAction(QIcon(f'{self.IMG_DIR}/exit.png'), 'Выход', self)
         exit_btn.setShortcut('Ctrl+Q')

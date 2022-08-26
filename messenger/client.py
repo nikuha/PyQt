@@ -21,7 +21,7 @@ from logs.settings.socket_logger import SocketLogger
 class MsgClient(TCPSocket, QObject):
     port = Port()
     address = Address()
-    lost_connection_signal = pyqtSignal()
+    lost_connection_signal = pyqtSignal(dict)
     load_data_signal = pyqtSignal(list, list)
     fill_chat_signal = pyqtSignal(str, list, bool)
     status_message_signal = pyqtSignal(str, bool)
@@ -35,7 +35,7 @@ class MsgClient(TCPSocket, QObject):
         self.logger = socket_logger.logger
 
         self.db = None
-        self.user = {settings.REQUEST_ACCOUNT_NAME: None}
+        self.user = {settings.REQUEST_ACCOUNT_NAME: None, settings.REQUEST_PASSWORD: None}
         self.main_window = None
 
         self.to_server_messages = []
@@ -48,17 +48,19 @@ class MsgClient(TCPSocket, QObject):
         parser = argparse.ArgumentParser()
         parser.add_argument('port', default=settings.DEFAULT_PORT, type=int, nargs='?')
         parser.add_argument('address', default=settings.DEFAULT_IP_ADDRESS, nargs='?')
-        parser.add_argument('-n', default='', nargs='?')
+        parser.add_argument('-n', '--name', default='', nargs='?')
+        parser.add_argument('-p', '--password', default='', nargs='?')
         namespace = parser.parse_args(sys.argv[1:])
         address = namespace.address
         port = namespace.port
-        account_name = namespace.n
+        account_name = namespace.name
+        password = namespace.password
 
         sock = cls()
-        sock.connect(address, port, account_name)
+        sock.connect(address, port, account_name, password)
         return sock
 
-    def connect(self, address, port, account_name=None):
+    def connect(self, address, port, account_name=None, password=None):
         try:
             self.port = port
         except TypeError as e:
@@ -67,6 +69,7 @@ class MsgClient(TCPSocket, QObject):
         try:
             self.sock.connect((address, port))
             self.user[settings.REQUEST_ACCOUNT_NAME] = account_name
+            self.user[settings.REQUEST_PASSWORD] = password
             self.logger.info(f'Подключились к серверу {address}:{port}')
         except ConnectionRefusedError:
             self.logger.critical(f'Не удалось подключиться к серверу {address}:{port}')
@@ -80,12 +83,13 @@ class MsgClient(TCPSocket, QObject):
 
         client_app = QApplication(sys.argv)
 
-        if not self.user[settings.REQUEST_ACCOUNT_NAME]:
+        if (not self.user[settings.REQUEST_ACCOUNT_NAME]) or (not self.user[settings.REQUEST_PASSWORD]):
             login_dialog = LoginDialog()
             client_app.exec_()
 
             if login_dialog.ok_pressed:
                 self.user[settings.REQUEST_ACCOUNT_NAME] = login_dialog.client_name.text()
+                self.user[settings.REQUEST_PASSWORD] = login_dialog.password.text()
                 del login_dialog
             else:
                 exit(0)
@@ -209,14 +213,15 @@ class MsgClient(TCPSocket, QObject):
     def _action_request(self, action, data=None):
         return self.compose_action_request(action, data=data)
 
-    @staticmethod
-    def _get_response(data):
+    def _get_response(self, data):
         try:
             if settings.RESPONSE_STATUS not in data:
                 raise ValueError
             message_to_client = f'Status: {data[settings.RESPONSE_STATUS]}'
             if settings.RESPONSE_MESSAGE in data:
                 message_to_client += f', {data[settings.RESPONSE_MESSAGE]}'
+                if data[settings.RESPONSE_STATUS] == 400:
+                    self.lost_connection_signal.emit({'title': 'Ошибка', 'message': data[settings.RESPONSE_MESSAGE]})
             return message_to_client
         except (ValueError, json.JSONDecodeError):
             return 'Неизвестный статус ответа сервера!'
@@ -338,7 +343,7 @@ class MsgClient(TCPSocket, QObject):
     def _lost_connection(self):
         self.logger.error(f'Соединение с сервером было потеряно.')
         self.receiving_stop_flag = True
-        self.lost_connection_signal.emit()
+        self.lost_connection_signal.emit({})
 
 
 if __name__ == '__main__':
