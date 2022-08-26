@@ -1,9 +1,7 @@
-import time
 from sys import argv
 from os import path
 
-from PyQt5 import QtGui
-from PyQt5.QtCore import Qt, pyqtSlot, QItemSelectionModel
+from PyQt5.QtCore import Qt, pyqtSlot
 from PyQt5.QtGui import QStandardItemModel, QStandardItem, QBrush, QColor
 from PyQt5.QtWidgets import QMainWindow, QApplication, QListView, QComboBox, QTextEdit, QPushButton, QLabel, QMessageBox
 

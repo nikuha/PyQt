@@ -1,3 +1,4 @@
 sqlalchemy
 pyqt5
 pycryptodomex
+ sphinx-autobuild
