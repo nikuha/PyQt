@@ -1,0 +1,7 @@
+msg\_server module
+==================
+
+.. automodule:: msg_server
+   :members:
+   :undoc-members:
+   :show-inheritance:

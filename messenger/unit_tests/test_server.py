@@ -3,14 +3,14 @@ import sys
 from unittest import mock, TestCase, main as unittest_main
 import time
 sys.path.append(os.path.join(os.getcwd(), '..'))
-from server import MyServer
+from msg_server import MsgServer
 import common.settings as settings
 
 
 class TestServer(TestCase):
     def setUp(self):
         with mock.patch('socket.socket') as _:
-            self.server = MyServer()
+            self.server = MsgServer()
 
     def test_process_message_correct(self):
         """Верный запрос присутствия к серверу"""
