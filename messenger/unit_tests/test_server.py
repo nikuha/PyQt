@@ -3,7 +3,7 @@ import sys
 from unittest import mock, TestCase, main as unittest_main
 import time
 sys.path.append(os.path.join(os.getcwd(), '..'))
-from msg_server import MsgServer
+from server import MsgServer
 import common.settings as settings
 
 

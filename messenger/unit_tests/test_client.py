@@ -2,7 +2,7 @@ import os
 import sys
 from unittest import mock, TestCase, main as unittest_main
 sys.path.append(os.path.join(os.getcwd(), '..'))
-from msg_client import MsgClient
+from client import MsgClient
 import common.settings as settings
 import json
 
