@@ -21,6 +21,9 @@ from logs.settings.socket_logger import SocketLogger
 from server.server_db import ServerDB
 # from logs.settings.log_decorator import LogDecorator
 
+BASE_DIR = os.getcwd()
+CONFIG_FILE = f'{BASE_DIR}/server/server.ini'
+
 
 class MsgServer(TCPSocket, metaclass=ServerVerifier):
     port = Port()
@@ -36,8 +39,8 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         self.names = {}
 
         self.config = ConfigParser()
-        dir_path = os.path.dirname(os.path.realpath(__file__))
-        self.config.read(f"{dir_path}/server/{'server.ini'}")
+        self._load_config()
+
         self.db = ServerDB(os.path.join(self.config['SETTINGS']['db_path'],
                                         self.config['SETTINGS']['db_file']))
 
@@ -154,7 +157,7 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
             self.config['SETTINGS']['listen_address'] = self.config_window.ip.text()
             self.config['SETTINGS']['listen_port'] = self.config_window.port.text()
 
-            with open('server/server.ini', 'w') as conf:
+            with open(CONFIG_FILE, 'w') as conf:
                 self.config.write(conf)
                 message.information(self.config_window, 'OK', 'Настройки успешно сохранены!')
 
@@ -395,6 +398,20 @@ class MsgServer(TCPSocket, metaclass=ServerVerifier):
         if message:
             data[settings.RESPONSE_MESSAGE] = message
         return self.compose_action_request(settings.ACTION_RESPONSE, data=data)
+
+    def _load_config(self):
+        if os.path.exists(CONFIG_FILE):
+            self.config.read(CONFIG_FILE)
+            print('!')
+        else:
+            self.config['SETTINGS'] = {
+                'db_path': '',
+                'db_file': 'server.sqlite3',
+                'listen_port': settings.DEFAULT_PORT,
+                'listen_address': ''
+            }
+            with open(CONFIG_FILE, 'w') as conf:
+                self.config.write(conf)
 
 
 if __name__ == '__main__':
